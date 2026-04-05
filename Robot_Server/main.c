@@ -1,0 +1,239 @@
+#include <stdint.h>
+#include "msp.h"
+#include "inc/Clock.h"
+#include "inc/CortexM.h"
+#include "inc/GPIO.h"
+#include "inc/EUSCI_A0_UART.h"
+#include "inc/Motor.h"
+#include "inc/Timer_A1_Interrupt.h"
+#include "inc/SysTick_Interrupt.h"
+#include "inc/Reflectance_Sensor.h"
+
+#include "inc/Timer_A2_PWM.h"
+
+
+// Init
+#define PWM_NOMINAL 2500
+#define SPEED 2500
+
+// Initialize a global variable for SysTick to keep track of elapsed time in milliseconds
+uint32_t SysTick_ms_elapsed = 0;
+
+// Global flag that gets set in Bumper_Switches_Handler.
+// This is used to detect if any collisions occurred when any one of the bumper switches are pressed.
+uint8_t collision_detected = 0;
+
+/**
+ * @brief Interrupt service routine for the SysTick timer.
+ *
+ * The interrupt service routine for the SysTick timer increments the SysTick_ms_elapsed
+ * global variable to keep track of the elapsed milliseconds. If collision_detected is 0, then
+ * it checks if 500 milliseconds passed. It toggles the front yellow LEDs and turns off the back red LEDs
+ * on the chassis board. Otherwise, if collision_detected is set, it turns off the front yellow LEDs
+ * and turns on the back red LEDs on the chassis board.
+ *
+ * @param None
+ *
+ * @return None
+ */
+void SysTick_Handler(void)
+{
+    SysTick_ms_elapsed++;
+
+    if (collision_detected == 0)
+    {
+        if (SysTick_ms_elapsed >= 500)
+        {
+            P8->OUT &= ~0xC0;
+            P8->OUT ^= 0x21;
+            SysTick_ms_elapsed = 0;
+        }
+    }
+
+    else
+    {
+        P8->OUT |= 0xC0;
+        P8->OUT &= ~0x21;
+    }
+}
+
+/**
+ * @brief Bumper switch interrupt handler function.
+ *
+ * This is the interrupt handler for the bumper switch interrupts. It is called when a falling edge event is detected on
+ * any of the bumper switch pins. The function checks if a collision has already been detected; if not, it prints a collision
+ * detection message along with the bumper switch state and sets the collision_detected flag to prevent further detections.
+ *
+ * @param bumper_switch_state An 8-bit unsigned integer representing the bumper switch states at the time of the interrupt.
+ *
+ * @return None
+ */
+void Bumper_Switches_Handler(uint8_t bumper_switch_state)
+{
+    if (collision_detected == 0){
+        printf("Collision Detected! Bumper Switch State: 0x%02X\n", bumper_switch_state);
+        collision_detected = 1;
+    }
+}
+
+/**
+ * @brief Execute a predefined drive pattern using the DC motors.
+ *
+ * This function executes a predefined drive pattern using the DC motors. It involves a sequence of motor commands
+ * to create specific movements. The sequence consists of:
+ *
+ * 1. Setting both motors to move forward with a 50% duty cycle for a duration of 2 seconds.
+ * 2. Stopping the motors for 2 seconds.
+ * 3. Setting both motors to move left with a 30% duty cycle for 2 seconds.
+ * 4. Stopping the motors for 2 seconds.
+ * 5. Setting both motors to move right with a 30% duty cycle for 2 seconds.
+ * 6. Stopping the motors for 2 seconds.
+ * 7. Setting both motors to move backward with a 30% duty cycle for 2 seconds.
+ * 8. Stopping the motors for 2 seconds.
+ *
+ * @note The Clock_Delay1ms function is used to introduce delays between motor actions.
+ *
+ * @param None
+ *
+ * @return None
+ */
+void Drive_Pattern_1()
+{
+    Clock_Delay1ms(8000);
+
+    // Set PWM to 50% Duty Cycle
+    Motor_Forward(7500, 7500);
+    Clock_Delay1ms(2000);
+
+    // Stop the motors
+    Motor_Stop();
+    Clock_Delay1ms(2000);
+
+    // Set PWM to 30% Duty Cycle
+    Motor_Left(4500, 4500);
+    Clock_Delay1ms(1000);
+
+    // Stop the motors
+    Motor_Stop();
+    Clock_Delay1ms(2000);
+
+    // Set PWM to 30% Duty Cycle
+    Motor_Right(4500, 4500);
+    Clock_Delay1ms(1000);
+
+    // Stop the motors
+    Motor_Stop();
+    Clock_Delay1ms(2000);
+
+    // Set PWM to 30% Duty Cycle
+    Motor_Backward(4500, 4500);
+    Clock_Delay1ms(2000);
+
+    // Stop the motors
+    Motor_Stop();
+    Clock_Delay1ms(2000);
+}
+
+/**
+ * @brief
+ *
+ * @param None
+ *
+ * @return None
+ */
+void Handle_Collision()
+{
+    // Stop the motors
+    Motor_Stop();
+
+    // Make a function call to Clock_Delay1ms(2000)
+    Clock_Delay1ms(2000);
+
+    // Move the motors backward with 30% duty cycle
+    Motor_Backward(4500, 4500);
+
+    // Make a function call to Clock_Delay1ms(2000)
+    Clock_Delay1ms(2000);
+
+    // Stop the motors
+    Motor_Stop();
+
+    // Make a function call to Clock_Delay1ms(1000)
+    Clock_Delay1ms(1000);
+
+    // Make the robot turn to the right with 10% duty cycle
+    Motor_Right(1500, 1500);
+
+    // Make a function call to Clock_Delay1ms(4000)
+    Clock_Delay1ms(1000);
+
+    // Stop the motorsX
+    Motor_Stop();
+
+    // Make a function call to Clock_Delay1ms(2000)
+    Clock_Delay1ms(2000);
+
+    // Set the collision_detected flag to 0
+    collision_detected = 0;
+}
+
+int main(void)
+{
+    // Initialize the 48 MHz Clock
+    Clock_Init48MHz();
+
+    // Initialize the built-in red LED and the RGB LEDs
+    LED1_Init();
+    LED2_Init();
+
+    // Initialize the user buttons
+    Buttons_Init();
+
+    // Initialize the front and back LEDs on the chassis board
+    Chassis_Board_LEDs_Init();
+
+    // Initialize EUSCI_A0_UART
+    EUSCI_A0_UART_Init_Printf();
+
+    // Initialize the SysTick timer to generate periodic interrupts every 1 ms
+    SysTick_Interrupt_Init(SYSTICK_INT_NUM_CLK_CYCLES, SYSTICK_INT_PRIORITY);
+
+    // Initialize Timer A2 with a period of 50 Hz
+    // Timer A2 will be used to drive two servos
+    Timer_A2_PWM_Init(TIMER_A2_PERIOD_CONSTANT, 0, 0);
+
+    // Initialize the bumper switches which will be used to generate external I/O-triggered in
+    Bumper_Switches_Init(&Bumper_Switches_Handler);
+
+    // Initialize the DC motors
+    Motor_Init();
+
+    // Enable the interrupts used by the SysTick and Timer A1 timers
+    EnableInterrupts();
+
+    while(1)
+    {
+        // Rotate to 0
+        Timer_A2_Update_Duty_Cycle_1(1700);
+        Timer_A2_Update_Duty_Cycle_2(1700);
+        LED2_Output(RGB_LED_RED);
+        Clock_Delay1ms(3000);
+
+        // Rotate to 180
+        Timer_A2_Update_Duty_Cycle_1(7000);
+        Timer_A2_Update_Duty_Cycle_2(7000);
+        LED2_Output(RGB_LED_BLUE);
+        Clock_Delay1ms(3000);
+
+        // Drive_Pattern_1();
+//
+//        if (collision_detected == 1)
+//        {
+//            Handle_Collision();
+//        }
+//        else
+//        {
+//            Motor_Forward(4500, 4500);
+//        }
+    }
+}
