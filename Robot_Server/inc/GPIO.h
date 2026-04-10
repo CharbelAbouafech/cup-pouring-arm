@@ -2,25 +2,9 @@
  * @file GPIO.h
  * @brief Header file for the GPIO driver.
  *
- * This file contains the function definitions for the GPIO driver.
- * It interfaces with the following:
- *  - User buttons and LEDs of the TI MSP432 LaunchPad
- *  - PMOD SWT (4 Slide Switches)
- *  - PMOD 8LD (8 LEDs)
+ * Includes function declarations for PMOD Switches & LEDs on chassis Board
  *
- * To verify the pinout of the user buttons and LEDs, refer to the MSP432P401R SimpleLink Microcontroller LaunchPad Development Kit User's Guide
- * Link: https://docs.rs-online.com/3934/A700000006811369.pdf
- *
- * For more information regarding the PMODs used in this lab, visit the following links:
- *  - PMOD SWT: https://digilent.com/reference/pmod/pmodswt/reference-manual
- *  - PMOD 8LD: https://digilent.com/reference/pmod/pmod8ld/reference-manual
- *
- * @note The user buttons, located at P1.1 and P1.4, are configured with negative logic
- * as the default setting. When the buttons are pressed, they connect to GND. Refer to the
- * schematic found in the MSP432P401R LaunchPad User's Guide.
- *
- * @author Aaron Nanas
- *
+ * @author Javier Narvaez, Charbel Abou Afech
  */
 
 #ifndef INC_GPIO_H_
@@ -209,46 +193,6 @@ void Buttons_Init();
 uint8_t Get_Buttons_Status();
 
 /**
- * @brief The PMOD_8LD_Init function initializes the pins (P9.0 - P9.7) used by the Digilent PMOD 8LD module.
- *
- * This function initializes the pins, P9.0 through P9.7, which will be used to drive the eight
- * LEDs on the Digilent PMOD 8LD module. It configures the pins as GPIO output pins with high drive strength.
- *
- * The following connections must be made:
- *  - PMOD LED0   <-->  MSP432 LaunchPad Pin P9.0
- *  - PMOD LED1   <-->  MSP432 LaunchPad Pin P9.1
- *  - PMOD LED2   <-->  MSP432 LaunchPad Pin P9.2
- *  - PMOD LED3   <-->  MSP432 LaunchPad Pin P9.3
- *  - PMOD Pin 5  <-->  MSP432 LaunchPad GND
- *  - PMOD Pin 6  <-->  MSP432 LaunchPad VCC (3.3V)
- *  - PMOD LED4   <-->  MSP432 LaunchPad Pin P9.4
- *  - PMOD LED5   <-->  MSP432 LaunchPad Pin P9.5
- *  - PMOD LED6   <-->  MSP432 LaunchPad Pin P9.6
- *  - PMOD LED7   <-->  MSP432 LaunchPad Pin P9.7
- *  - PMOD Pin 11 <-->  MSP432 LaunchPad GND
- *  - PMOD Pin 12 <-->  MSP432 LaunchPad VCC (3.3V)
- *
- * @param None
- *
- * @return None
- */
-void PMOD_8LD_Init();
-
-/**
- * @brief The PMOD_8LD_Output function sets the output of the eight LEDs on the PMOD 8LD module.
- *
- * This function sets the output value of the PMOD 8LD module by writing the provided led_value to the
- * corresponding output pins. It then reads back the actual value written to the PMOD 8LD module and returns it.
- *
- * @param led_value An 8-bit unsigned integer representing the desired output value for the PMOD 8LD module.
- *
- * @return The output value written to the PMOD 8LD module.
- *         0: LED Off
- *         1: LED On
- */
-uint8_t PMOD_8LD_Output(uint8_t led_value);
-
-/**
  * @brief The PMOD_SWT_Init function initializes the pins (P10.0 - P10.3) used by the Digilent PMOD SWT module.
  *
  * This function initializes the pins, P10.0 through P10.3, which will be used to receive the inputs
@@ -301,57 +245,6 @@ void PMOD_SWT_Init();
  *
  */
 uint8_t Get_PMOD_SWT_Status();
-
-/**
- * @brief The LED_Pattern_1 function sets the output of the user LEDs based on the status of the user buttons.
- *
- * This function sets the output of both the built-in red LED (P1.0) and the RGB LED (P2.0 - P2.2) based on
- * the status of the Button 1 (P1.1) and Button 2 (P1.4).
- *
- * @param button_status An 8-bit unsigned integer that indicates the status of Button 1 and Button 2.
- *                      The two user LEDs are controlled based on the value of button_status.
- *
- *  button_status      LED 1 Color      RGB LED Color
- *  -------------      -----------      -------------
- *      0x00               Red              Red
- *      0x10               Red              Off
- *      0x02               Off              Green
- *      0x12               Off              Off
- *
- *
- * @return None
- */
-void LED_Pattern_1(uint8_t button_status);
-
-/**
- * @brief The LED_Pattern_2 function controls the user LEDs and the eight LEDs on the PMOD 8LD module.
- *
- * This function turns on LED1 with a red color, sets the RGB LED to display a red color,
- * and then initiates a binary counter pattern on the PMOD 8LD module. The counter starts from 0
- * and increments up to 255 (0xFF) with a delay of 100 ms between each count. The sequence stops if
- * a specific switch status is detected or if led_count has reached 0xFF.
- *
- *
- * @param None
- *
- * @return None
- */
-void LED_Pattern_2();
-
-/**
- * @brief The LED_Controller function selects and executes an appropriate LED pattern based on button and switch statuses.
- *
- * This function determines the LED pattern to execute based on the given button status and switch status.
- * It calls different pattern functions based on the switch status value.
- *
- * @param button_status An 8-bit unsigned integer representing the status of the user buttons. This value is used to determine
- *                      the LED pattern in some cases.
- * @param switch_status An 8-bit unsigned integer representing the status of the switches on the PMOD SWT. This value is used
- *                      to select the LED pattern to execute.
- *
- * @return None
- */
-void LED_Controller(uint8_t button_status, uint8_t switch_status);
 
 /**
  * @brief The Chassis_Board_LEDs_Init function initializes the LEDs on the chassis board.

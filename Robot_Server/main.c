@@ -3,237 +3,288 @@
 #include "inc/Clock.h"
 #include "inc/CortexM.h"
 #include "inc/GPIO.h"
-#include "inc/EUSCI_A0_UART.h"
 #include "inc/Motor.h"
 #include "inc/Timer_A1_Interrupt.h"
+#include "inc/Timer_A2_PWM.h"
 #include "inc/SysTick_Interrupt.h"
 #include "inc/Reflectance_Sensor.h"
 
-#include "inc/Timer_A2_PWM.h"
 
 
-// Init
+// Initialization
 #define PWM_NOMINAL 2500
 #define SPEED 2500
 
-// Initialize a global variable for SysTick to keep track of elapsed time in milliseconds
-uint32_t SysTick_ms_elapsed = 0;
-
-// Global flag that gets set in Bumper_Switches_Handler.
-// This is used to detect if any collisions occurred when any one of the bumper switches are pressed.
 uint8_t collision_detected = 0;
 
-/**
- * @brief Interrupt service routine for the SysTick timer.
- *
- * The interrupt service routine for the SysTick timer increments the SysTick_ms_elapsed
- * global variable to keep track of the elapsed milliseconds. If collision_detected is 0, then
- * it checks if 500 milliseconds passed. It toggles the front yellow LEDs and turns off the back red LEDs
- * on the chassis board. Otherwise, if collision_detected is set, it turns off the front yellow LEDs
- * and turns on the back red LEDs on the chassis board.
- *
- * @param None
- *
- * @return None
- */
-void SysTick_Handler(void)
-{
-    SysTick_ms_elapsed++;
+uint8_t switch_status = 0;
 
-    if (collision_detected == 0)
+uint8_t point = 0;
+
+static uint32_t Timer_A1_ms_elapsed = 0;
+
+typedef enum
+{
+    CENTER                  = 0b00011000,
+    SLIGHT_LEFT_CENTER      = 0b00011100,
+    SLIGHT_RIGHT_CENTER     = 0b00111000,
+    FAR_LEFT                = 0b00000001,
+    FAR_RIGHT               = 0b10000000,
+    LEFT_TURN               = 0b11111000,
+    RIGHT_TURN              = 0b00011111,
+    T_INTERSECTION          = 0b11111111,
+    DEAD_END                = 0b00000000
+} Line_Position;
+
+typedef enum
+{
+    FOLLOW_LINE,
+    CHECK_INTERSECTION,
+    TURN_AROUND,
+    TURN_LEFT_STATE,
+    TURN_RIGHT_STATE,
+    DEAD_END_STATE
+} RobotState;
+
+static RobotState currentState = FOLLOW_LINE;
+
+
+void Detect_Line_Position(uint32_t reflectance_sensor_data)
+{
+    switch(currentState)
     {
-        if (SysTick_ms_elapsed >= 500)
+        case FOLLOW_LINE:
         {
-            P8->OUT &= ~0xC0;
-            P8->OUT ^= 0x21;
-            SysTick_ms_elapsed = 0;
+            LED1_Output(RED_LED_OFF);
+            LED2_Output(RGB_LED_GREEN);
+            switch(reflectance_sensor_data)
+            {
+                case CENTER:
+                {
+                    Motor_Forward(SPEED, SPEED);
+                    break;
+                }
+                case SLIGHT_LEFT_CENTER:
+                {
+                    LED1_Output(RED_LED_OFF);
+                    LED2_Output(RGB_LED_YELLOW);
+                    Motor_Right(SPEED, SPEED);
+                    break;
+                }
+                case SLIGHT_RIGHT_CENTER:
+                {
+                    LED1_Output(RED_LED_OFF);
+                    LED2_Output(RGB_LED_PINK);
+                    Motor_Left(SPEED, SPEED);
+                    break;
+                }
+                case FAR_LEFT:
+                {
+                    LED1_Output(RED_LED_OFF);
+                    LED2_Output(RGB_LED_WHITE);
+                    Motor_Right(4500, 4500);
+                    Clock_Delay1ms(300);
+                    Motor_Forward(2500, 2500);
+                    Clock_Delay1ms(300);
+                    currentState = CHECK_INTERSECTION;
+                    break;
+                }
+                case FAR_RIGHT:
+                {
+                    LED1_Output(RED_LED_OFF);
+                    LED2_Output(RGB_LED_SKY_BLUE);
+                    Motor_Left(2500, 2500);
+                    Clock_Delay1ms(500);
+                    Motor_Forward(2500, 2500);
+                    Clock_Delay1ms(500);
+                    currentState = CHECK_INTERSECTION;
+                    break;
+                }
+                case LEFT_TURN:
+                {
+                    currentState = CHECK_INTERSECTION;
+                    break;
+                }
+                case RIGHT_TURN:
+                {
+                    currentState = CHECK_INTERSECTION;
+                    break;
+                }
+                case T_INTERSECTION:
+                {
+                    if (switch_status == 1 && point == 0)
+                    {
+                        Timer_A2_Update_Duty_Cycle_1(1700);
+                        Timer_A2_Update_Duty_Cycle_2(1700);
+                        Clock_Delay1ms(3000);
+
+                        Timer_A2_Update_Duty_Cycle_1(7000);
+                        Timer_A2_Update_Duty_Cycle_2(7000);
+                        Clock_Delay1ms(3000);
+                        point += 1;
+                    }
+                    if (switch_status == 2)
+                    {
+                        currentState = TURN_RIGHT_STATE;
+                    }
+                    else{
+                        currentState = TURN_AROUND;   // choose strategy
+                    }
+                    break;
+                }
+                case DEAD_END:
+                {
+                    LED1_Output(RED_LED_ON);
+                    LED2_Output(RGB_LED_OFF);
+                    Motor_Stop();
+                    break;
+                }
+                default:
+                {
+                    LED1_Output(RED_LED_ON);
+                    LED2_Output(RGB_LED_RED);
+                    Motor_Stop();
+                    break;
+                }
+            }
+            break;
+        }
+        case TURN_AROUND:
+        {
+            LED1_Output(RED_LED_OFF);
+            LED2_Output(RGB_LED_BLUE);
+            Motor_Left(4500, 4500);
+            Clock_Delay1ms(900);
+            currentState = CHECK_INTERSECTION;
+            break;
+        }
+
+        case CHECK_INTERSECTION:
+        {
+            int half = SPEED / 2;
+            Motor_Forward(half, half);
+            Clock_Delay1ms(200);
+            Motor_Stop();
+            switch(reflectance_sensor_data)
+            {
+                case CENTER:
+                {
+                    currentState = FOLLOW_LINE;
+                    break;
+                }
+                case SLIGHT_LEFT_CENTER:
+                {
+                    currentState = FOLLOW_LINE;
+                    break;
+                }
+                case SLIGHT_RIGHT_CENTER:
+                {
+                    currentState = FOLLOW_LINE;
+                    break;
+                }
+                case T_INTERSECTION:
+                {
+                    currentState = TURN_AROUND;
+                    break;
+                }
+                case LEFT_TURN:
+                {
+                    currentState = TURN_LEFT_STATE;
+                    break;
+                }
+                case RIGHT_TURN:
+                {
+                    currentState = TURN_RIGHT_STATE;
+                    break;
+                }
+                default:
+                {
+                    currentState = FOLLOW_LINE;
+                    break;
+                }
+            }
+            break;
+        }
+
+        case TURN_LEFT_STATE:
+        {
+            Motor_Forward(SPEED, SPEED);
+            Clock_Delay1ms(250);
+            Motor_Left(4500, 4500);
+            Clock_Delay1ms(450);
+            Motor_Forward(SPEED, SPEED);
+            Clock_Delay1ms(200);
+            currentState = CHECK_INTERSECTION;
+            break;
+        }
+
+        case TURN_RIGHT_STATE:
+        {
+            Motor_Forward(SPEED, SPEED);
+            Clock_Delay1ms(250);
+            Motor_Right(4500, 4500);
+            Clock_Delay1ms(450);
+            Motor_Forward(SPEED, SPEED);
+            Clock_Delay1ms(200);
+            currentState = CHECK_INTERSECTION;
+            break;
+        }
+
+        default:
+        {
+            currentState = FOLLOW_LINE;
+            break;
         }
     }
 
-    else
+}
+
+
+void Timer_A1_Periodic_Task(void)
+{
+    Timer_A1_ms_elapsed++;
+
+    if ((Timer_A1_ms_elapsed % 10) == 0)
     {
-        P8->OUT |= 0xC0;
-        P8->OUT &= ~0x21;
+        Reflectance_Sensor_Start();
+    }
+
+    if ((Timer_A1_ms_elapsed % 10) == 1)
+    {
+        uint8_t Reflectance_Sensor_Data = Reflectance_Sensor_End();
+        switch_status = Get_PMOD_SWT_Status();
+        if(switch_status != 0){
+            Detect_Line_Position(Reflectance_Sensor_Data);
+        }
     }
 }
 
-/**
- * @brief Bumper switch interrupt handler function.
- *
- * This is the interrupt handler for the bumper switch interrupts. It is called when a falling edge event is detected on
- * any of the bumper switch pins. The function checks if a collision has already been detected; if not, it prints a collision
- * detection message along with the bumper switch state and sets the collision_detected flag to prevent further detections.
- *
- * @param bumper_switch_state An 8-bit unsigned integer representing the bumper switch states at the time of the interrupt.
- *
- * @return None
- */
-void Bumper_Switches_Handler(uint8_t bumper_switch_state)
-{
-    if (collision_detected == 0){
-        printf("Collision Detected! Bumper Switch State: 0x%02X\n", bumper_switch_state);
-        collision_detected = 1;
-    }
-}
+int main(void){
 
-/**
- * @brief Execute a predefined drive pattern using the DC motors.
- *
- * This function executes a predefined drive pattern using the DC motors. It involves a sequence of motor commands
- * to create specific movements. The sequence consists of:
- *
- * 1. Setting both motors to move forward with a 50% duty cycle for a duration of 2 seconds.
- * 2. Stopping the motors for 2 seconds.
- * 3. Setting both motors to move left with a 30% duty cycle for 2 seconds.
- * 4. Stopping the motors for 2 seconds.
- * 5. Setting both motors to move right with a 30% duty cycle for 2 seconds.
- * 6. Stopping the motors for 2 seconds.
- * 7. Setting both motors to move backward with a 30% duty cycle for 2 seconds.
- * 8. Stopping the motors for 2 seconds.
- *
- * @note The Clock_Delay1ms function is used to introduce delays between motor actions.
- *
- * @param None
- *
- * @return None
- */
-void Drive_Pattern_1()
-{
-    Clock_Delay1ms(8000);
+    DisableInterrupts();
 
-    // Set PWM to 50% Duty Cycle
-    Motor_Forward(7500, 7500);
-    Clock_Delay1ms(2000);
-
-    // Stop the motors
-    Motor_Stop();
-    Clock_Delay1ms(2000);
-
-    // Set PWM to 30% Duty Cycle
-    Motor_Left(4500, 4500);
-    Clock_Delay1ms(1000);
-
-    // Stop the motors
-    Motor_Stop();
-    Clock_Delay1ms(2000);
-
-    // Set PWM to 30% Duty Cycle
-    Motor_Right(4500, 4500);
-    Clock_Delay1ms(1000);
-
-    // Stop the motors
-    Motor_Stop();
-    Clock_Delay1ms(2000);
-
-    // Set PWM to 30% Duty Cycle
-    Motor_Backward(4500, 4500);
-    Clock_Delay1ms(2000);
-
-    // Stop the motors
-    Motor_Stop();
-    Clock_Delay1ms(2000);
-}
-
-/**
- * @brief
- *
- * @param None
- *
- * @return None
- */
-void Handle_Collision()
-{
-    // Stop the motors
-    Motor_Stop();
-
-    // Make a function call to Clock_Delay1ms(2000)
-    Clock_Delay1ms(2000);
-
-    // Move the motors backward with 30% duty cycle
-    Motor_Backward(4500, 4500);
-
-    // Make a function call to Clock_Delay1ms(2000)
-    Clock_Delay1ms(2000);
-
-    // Stop the motors
-    Motor_Stop();
-
-    // Make a function call to Clock_Delay1ms(1000)
-    Clock_Delay1ms(1000);
-
-    // Make the robot turn to the right with 10% duty cycle
-    Motor_Right(1500, 1500);
-
-    // Make a function call to Clock_Delay1ms(4000)
-    Clock_Delay1ms(1000);
-
-    // Stop the motorsX
-    Motor_Stop();
-
-    // Make a function call to Clock_Delay1ms(2000)
-    Clock_Delay1ms(2000);
-
-    // Set the collision_detected flag to 0
-    collision_detected = 0;
-}
-
-int main(void)
-{
-    // Initialize the 48 MHz Clock
     Clock_Init48MHz();
 
-    // Initialize the built-in red LED and the RGB LEDs
     LED1_Init();
     LED2_Init();
 
-    // Initialize the user buttons
-    Buttons_Init();
-
-    // Initialize the front and back LEDs on the chassis board
     Chassis_Board_LEDs_Init();
 
-    // Initialize EUSCI_A0_UART
-    EUSCI_A0_UART_Init_Printf();
+    Reflectance_Sensor_Init();
 
-    // Initialize the SysTick timer to generate periodic interrupts every 1 ms
     SysTick_Interrupt_Init(SYSTICK_INT_NUM_CLK_CYCLES, SYSTICK_INT_PRIORITY);
+    Timer_A1_Interrupt_Init(&Timer_A1_Periodic_Task, TIMER_A1_INT_CCR0_VALUE);
 
-    // Initialize Timer A2 with a period of 50 Hz
-    // Timer A2 will be used to drive two servos
     Timer_A2_PWM_Init(TIMER_A2_PERIOD_CONSTANT, 0, 0);
 
-    // Initialize the bumper switches which will be used to generate external I/O-triggered in
-    Bumper_Switches_Init(&Bumper_Switches_Handler);
+    PMOD_SWT_Init();
 
-    // Initialize the DC motors
     Motor_Init();
 
-    // Enable the interrupts used by the SysTick and Timer A1 timers
     EnableInterrupts();
 
     while(1)
     {
-        // Rotate to 0
-        Timer_A2_Update_Duty_Cycle_1(1700);
-        Timer_A2_Update_Duty_Cycle_2(1700);
-        LED2_Output(RGB_LED_RED);
-        Clock_Delay1ms(3000);
 
-        // Rotate to 180
-        Timer_A2_Update_Duty_Cycle_1(7000);
-        Timer_A2_Update_Duty_Cycle_2(7000);
-        LED2_Output(RGB_LED_BLUE);
-        Clock_Delay1ms(3000);
-
-        // Drive_Pattern_1();
-//
-//        if (collision_detected == 1)
-//        {
-//            Handle_Collision();
-//        }
-//        else
-//        {
-//            Motor_Forward(4500, 4500);
-//        }
     }
 }

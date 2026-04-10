@@ -2,25 +2,9 @@
  * @file GPIO.c
  * @brief Source code for the GPIO driver.
  *
- * This file contains the function definitions for the GPIO driver.
- * It interfaces with the following:
- *  - User buttons and LEDs of the TI MSP432 LaunchPad
- *  - PMOD SWT (4 Slide Switches)
- *  - PMOD 8LD (8 LEDs)
+ * Includes function declarations for PMOD Switches & LEDs on chassis Board
  *
- * To verify the pinout of the user buttons and LEDs, refer to the MSP432P401R SimpleLink Microcontroller LaunchPad Development Kit User's Guide
- * Link: https://docs.rs-online.com/3934/A700000006811369.pdf
- *
- * For more information regarding the PMODs used in this lab, visit the following links:
- *  - PMOD SWT: https://digilent.com/reference/pmod/pmodswt/reference-manual
- *  - PMOD 8LD: https://digilent.com/reference/pmod/pmod8ld/reference-manual
- *
- * @note The user buttons, located at P1.1 and P1.4, are configured with negative logic
- * as the default setting. When the buttons are pressed, they connect to GND. Refer to the
- * schematic found in the MSP432P401R LaunchPad User's Guide.
- *
- * @author Aaron Nanas
- *
+ * @author Javier Narvaez, Charbel Abou Afech
  */
 
 #include "../inc/GPIO.h"
@@ -109,22 +93,6 @@ uint8_t Get_Buttons_Status()
     return button_status;
 }
 
-void PMOD_8LD_Init()
-{
-    P9->SEL0 &= ~0xFF;
-    P9->SEL1 &= ~0xFF;
-    P9->DS |= 0xFF;
-    P9->DIR |= 0xFF;
-    P9->OUT &= ~0xFF;
-}
-
-uint8_t PMOD_8LD_Output(uint8_t led_value)
-{
-    P9->OUT = led_value;
-    uint8_t PMOD_8LD_value = P9->OUT;
-    return PMOD_8LD_value;
-}
-
 void PMOD_SWT_Init()
 {
     P10->SEL0 &= ~0xF;
@@ -136,90 +104,6 @@ uint8_t Get_PMOD_SWT_Status()
 {
     uint8_t switch_status = P10->IN & 0xF;
     return switch_status;
-}
-
-void LED_Pattern_1(uint8_t button_status)
-{
-    switch(button_status)
-    {
-        // Button 1 and Button 2 are pressed
-        case 0x00:
-        {
-            LED1_Output(RED_LED_ON);
-            LED2_Output(RGB_LED_GREEN);
-            PMOD_8LD_Output(PMOD_8LD_ALL_ON);
-            break;
-        }
-
-        // Button 1 is pressed
-        // Button 2 is not pressed
-        case 0x10:
-        {
-            LED1_Output(RED_LED_ON);
-            LED2_Output(RGB_LED_OFF);
-            PMOD_8LD_Output(PMOD_8LD_0_3_ON);
-            break;
-        }
-
-        // Button 1 is not pressed
-        // Button 2 is pressed
-        case 0x02:
-        {
-            LED1_Output(RED_LED_OFF);
-            LED2_Output(RGB_LED_GREEN);
-            PMOD_8LD_Output(PMOD_8LD_4_7_ON);
-            break;
-        }
-
-        // Button 1 and Button 2 are not pressed
-        case 0x12:
-        {
-            LED1_Output(RED_LED_OFF);
-            LED2_Output(RGB_LED_OFF);
-            PMOD_8LD_Output(PMOD_8LD_ALL_OFF);
-            break;
-        }
-    }
-}
-
-void LED_Pattern_2()
-{
-    LED1_Output(RED_LED_ON);
-    LED2_Output(RGB_LED_RED);
-
-    for (int led_count = 0; led_count <= 0xFF; led_count++)
-    {
-        PMOD_8LD_Output(led_count);
-        Clock_Delay1ms(100);
-        uint8_t switch_status = Get_PMOD_SWT_Status();
-        if (switch_status != 0x01)
-        {
-            break;
-        }
-    }
-}
-
-void LED_Controller(uint8_t button_status, uint8_t switch_status)
-{
-    switch(switch_status)
-    {
-        case 0x00:
-        {
-            LED_Pattern_1(button_status);
-        }
-        break;
-
-        case 0x01:
-        {
-            LED_Pattern_2();
-        }
-        break;
-
-        default:
-        {
-            LED_Pattern_1(button_status);
-        }
-    }
 }
 
 void Chassis_Board_LEDs_Init()
