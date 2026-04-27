@@ -49,6 +49,11 @@ typedef enum
 static RobotState currentState = FOLLOW_LINE;
 
 
+void arm_up();
+void arm_down();
+void claw_open();
+void claw_close();
+
 void Detect_Line_Position(uint32_t reflectance_sensor_data)
 {
     switch(currentState)
@@ -143,7 +148,11 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
                 {
                     LED1_Output(RED_LED_ON);
                     LED2_Output(RGB_LED_RED);
+                    int half = SPEED / 2;
+                    Motor_Forward(half, half);
+                    Clock_Delay1ms(100);
                     Motor_Stop();
+                    currentState = CHECK_INTERSECTION;
                     break;
                 }
             }
@@ -209,7 +218,7 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
         case TURN_LEFT_STATE:
         {
             Motor_Forward(SPEED, SPEED);
-            Clock_Delay1ms(250);
+            Clock_Delay1ms(100);
             Motor_Left(4500, 4500);
             Clock_Delay1ms(450);
             Motor_Forward(SPEED, SPEED);
@@ -221,7 +230,7 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
         case TURN_RIGHT_STATE:
         {
             Motor_Forward(SPEED, SPEED);
-            Clock_Delay1ms(250);
+            Clock_Delay1ms(100);
             Motor_Right(4500, 4500);
             Clock_Delay1ms(450);
             Motor_Forward(SPEED, SPEED);
@@ -287,4 +296,17 @@ int main(void){
     {
 
     }
+}
+
+void arm_up(){
+    Timer_A2_Update_Duty_Cycle_1(2000);
+}
+void arm_down(){
+    Timer_A2_Update_Duty_Cycle_1(2750);
+}
+void claw_open(){
+    Timer_A2_Update_Duty_Cycle_2(1700);
+}
+void claw_close(){
+    Timer_A2_Update_Duty_Cycle_2(5000);
 }
