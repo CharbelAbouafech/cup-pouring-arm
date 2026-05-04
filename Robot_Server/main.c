@@ -13,21 +13,25 @@
 
 // Initialization
 #define PWM_NOMINAL 2500
-#define SPEED 2500
+#define SPEEDL 2500
+#define SPEEDR 2500
 
 uint8_t collision_detected = 0;
+static uint32_t Timer_A1_ms_elapsed = 0;
 
+// Uses different switch values to determine the path
 uint8_t switch_status = 0;
 
+// Determines if action was taken
 uint8_t point = 0;
-
-static uint32_t Timer_A1_ms_elapsed = 0;
 
 typedef enum
 {
     CENTER                  = 0b00011000,
     SLIGHT_LEFT_CENTER      = 0b00011100,
+    OFF_LEFT                = 0b00001110,
     SLIGHT_RIGHT_CENTER     = 0b00111000,
+    OFF_RIGHT               = 0b01110000,
     FAR_LEFT                = 0b00000001,
     FAR_RIGHT               = 0b10000000,
     LEFT_TURN               = 0b11111000,
@@ -48,11 +52,9 @@ typedef enum
 
 static RobotState currentState = FOLLOW_LINE;
 
-
-void arm_up();
-void arm_down();
 void claw_open();
 void claw_close();
+void pickup();
 
 void Detect_Line_Position(uint32_t reflectance_sensor_data)
 {
@@ -66,41 +68,59 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
             {
                 case CENTER:
                 {
-                    Motor_Forward(SPEED, SPEED);
+                    Motor_Forward(SPEEDL, SPEEDR);
                     break;
                 }
                 case SLIGHT_LEFT_CENTER:
                 {
                     LED1_Output(RED_LED_OFF);
                     LED2_Output(RGB_LED_YELLOW);
-                    Motor_Right(SPEED, SPEED);
+                    Motor_Right(SPEEDL, SPEEDR);
+                    break;
+                }
+                case OFF_LEFT:
+                {
+                    LED1_Output(RED_LED_OFF);
+                    LED2_Output(RGB_LED_YELLOW);
+                    Motor_Right(SPEEDL, SPEEDR);
+                    Clock_Delay1ms(150);
+                    Motor_Forward(SPEEDL, SPEEDR);
+                    Clock_Delay1ms(300);
                     break;
                 }
                 case SLIGHT_RIGHT_CENTER:
                 {
                     LED1_Output(RED_LED_OFF);
                     LED2_Output(RGB_LED_PINK);
-                    Motor_Left(SPEED, SPEED);
+                    Motor_Left(SPEEDL, SPEEDR);
+                    break;
+                }
+                case OFF_RIGHT:
+                {
+                    LED1_Output(RED_LED_OFF);
+                    LED2_Output(RGB_LED_YELLOW);
+                    Motor_Left(SPEEDL, SPEEDR);
+                    Clock_Delay1ms(150);
+                    Motor_Forward(SPEEDL, SPEEDR);
+                    Clock_Delay1ms(300);
                     break;
                 }
                 case FAR_LEFT:
                 {
-                    LED1_Output(RED_LED_OFF);
                     LED2_Output(RGB_LED_WHITE);
                     Motor_Right(4500, 4500);
                     Clock_Delay1ms(300);
-                    Motor_Forward(2500, 2500);
+                    Motor_Forward(SPEEDL, SPEEDR);
                     Clock_Delay1ms(300);
                     currentState = CHECK_INTERSECTION;
                     break;
                 }
                 case FAR_RIGHT:
                 {
-                    LED1_Output(RED_LED_OFF);
                     LED2_Output(RGB_LED_SKY_BLUE);
                     Motor_Left(2500, 2500);
                     Clock_Delay1ms(500);
-                    Motor_Forward(2500, 2500);
+                    Motor_Forward(SPEEDL, SPEEDR);
                     Clock_Delay1ms(500);
                     currentState = CHECK_INTERSECTION;
                     break;
@@ -117,24 +137,17 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
                 }
                 case T_INTERSECTION:
                 {
-                    if (switch_status == 1 && point == 0)
-                    {
-                        Timer_A2_Update_Duty_Cycle_1(1700);
-                        Timer_A2_Update_Duty_Cycle_2(1700);
-                        Clock_Delay1ms(3000);
-
-                        Timer_A2_Update_Duty_Cycle_1(7000);
-                        Timer_A2_Update_Duty_Cycle_2(7000);
-                        Clock_Delay1ms(3000);
-                        point += 1;
-                    }
-                    if (switch_status == 2)
-                    {
-                        currentState = TURN_RIGHT_STATE;
-                    }
-                    else{
-                        currentState = TURN_AROUND;   // choose strategy
-                    }
+//                    if (point >= 1)
+//                    {
+//                        Motor_Stop();
+//                        pickup();
+//                        point += 1;
+//                    }
+//                    else{
+//                        currentState = TURN_AROUND;   // choose strategy
+//                    }
+//                    break;
+                    currentState = CHECK_INTERSECTION;
                     break;
                 }
                 case DEAD_END:
@@ -148,8 +161,9 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
                 {
                     LED1_Output(RED_LED_ON);
                     LED2_Output(RGB_LED_RED);
-                    int half = SPEED / 2;
-                    Motor_Forward(half, half);
+                    int halfL = SPEEDL / 2;
+                    int halfR = SPEEDR / 2;
+                    Motor_Forward(halfL, halfR);
                     Clock_Delay1ms(100);
                     Motor_Stop();
                     currentState = CHECK_INTERSECTION;
@@ -170,8 +184,9 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
 
         case CHECK_INTERSECTION:
         {
-            int half = SPEED / 2;
-            Motor_Forward(half, half);
+            int halfL = SPEEDL / 2;
+            int halfR = SPEEDR / 2;
+            Motor_Forward(halfL, halfR);
             Clock_Delay1ms(200);
             Motor_Stop();
             switch(reflectance_sensor_data)
@@ -193,17 +208,47 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
                 }
                 case T_INTERSECTION:
                 {
-                    currentState = TURN_AROUND;
+                    if (point == 1)
+                    {
+                        pickup();
+
+                        currentState = TURN_AROUND;   // choose strategy
+                    }
+                    else{
+                        //currentState = TURN_AROUND;   // choose strategy
+                        pickup();
+                        Motor_Stop();
+                    }
                     break;
                 }
                 case LEFT_TURN:
                 {
-                    currentState = TURN_LEFT_STATE;
+                    if (switch_status == 1 || switch_status == 4 )
+                    {
+                        Motor_Forward(SPEEDL, SPEEDR);
+                        Clock_Delay1ms(500);
+                        point += 1;
+                    }
+                    else
+                    {
+                        currentState = TURN_LEFT_STATE;
+                        point += 1;
+                    }
                     break;
                 }
                 case RIGHT_TURN:
                 {
-                    currentState = TURN_RIGHT_STATE;
+                    if (switch_status == 1)
+                    {
+                        Motor_Forward(SPEEDL, SPEEDR);
+                        Clock_Delay1ms(500);
+                        point += 1;
+                    }
+                    else
+                    {
+                        currentState = TURN_RIGHT_STATE;
+                        point += 1;
+                    }
                     break;
                 }
                 default:
@@ -217,24 +262,24 @@ void Detect_Line_Position(uint32_t reflectance_sensor_data)
 
         case TURN_LEFT_STATE:
         {
-            Motor_Forward(SPEED, SPEED);
-            Clock_Delay1ms(100);
+            Motor_Forward(SPEEDL, SPEEDR);
+            Clock_Delay1ms(90);
             Motor_Left(4500, 4500);
-            Clock_Delay1ms(450);
-            Motor_Forward(SPEED, SPEED);
-            Clock_Delay1ms(200);
+            Clock_Delay1ms(490);
+            Motor_Forward(SPEEDL, SPEEDR);
+            Clock_Delay1ms(500);
             currentState = CHECK_INTERSECTION;
             break;
         }
 
         case TURN_RIGHT_STATE:
         {
-            Motor_Forward(SPEED, SPEED);
-            Clock_Delay1ms(100);
+            Motor_Forward(SPEEDL, SPEEDR);
+            Clock_Delay1ms(90);
             Motor_Right(4500, 4500);
-            Clock_Delay1ms(450);
-            Motor_Forward(SPEED, SPEED);
-            Clock_Delay1ms(200);
+            Clock_Delay1ms(490);
+            Motor_Forward(SPEEDL, SPEEDR);
+            Clock_Delay1ms(500);
             currentState = CHECK_INTERSECTION;
             break;
         }
@@ -262,8 +307,15 @@ void Timer_A1_Periodic_Task(void)
     {
         uint8_t Reflectance_Sensor_Data = Reflectance_Sensor_End();
         switch_status = Get_PMOD_SWT_Status();
+        Timer_A2_Update_Duty_Cycle_1(2100);
         if(switch_status != 0){
+            claw_close();
             Detect_Line_Position(Reflectance_Sensor_Data);
+        }
+        else{
+            claw_open();
+            Motor_Stop();
+            point = 0;
         }
     }
 }
@@ -298,15 +350,19 @@ int main(void){
     }
 }
 
-void arm_up(){
-    Timer_A2_Update_Duty_Cycle_1(2000);
-}
-void arm_down(){
-    Timer_A2_Update_Duty_Cycle_1(2750);
-}
 void claw_open(){
-    Timer_A2_Update_Duty_Cycle_2(1700);
+    Timer_A2_Update_Duty_Cycle_2(1500);
 }
 void claw_close(){
-    Timer_A2_Update_Duty_Cycle_2(5000);
+    Timer_A2_Update_Duty_Cycle_2(2800);
 }
+
+void pickup(){
+    LED2_Output(RGB_LED_BLUE);
+    claw_open();
+    Clock_Delay1ms(500);
+    LED2_Output(RGB_LED_RED);
+    claw_close();
+    Clock_Delay1ms(500);
+}
+
