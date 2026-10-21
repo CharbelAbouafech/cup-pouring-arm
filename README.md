@@ -1,160 +1,122 @@
 # Cup Pouring Arm
 
-# Authors
-Javier Narvaez
-Charbel Abou Afech
+A line-following robot with a servo claw, written in bare-metal C for the TI MSP432. It follows a taped line, handles turns and intersections, and grabs a cup at a T-intersection. Four PMOD switches turn it on and pick the route it takes.
 
-## Project Overview
+**Authors:** Charbel Abou Afech, Javier Narvaez
 
-The Cup Pouring Arm project is an autonomous robotic system built using the MSP432 microcontroller. The system combines reflectance sensor feedback, finite state machine (FSM) logic, PWM motor control, and servo actuation to navigate a predefined path and perform automated pouring actions.
+**Demo video:** https://youtu.be/RD7pSS3bs8I
 
-The robot continuously reads reflectance sensor data to detect line position, intersections, and dead ends while adjusting movement in real time. Servo motors are controlled using PWM signals to perform arm movement and pouring actions. System behavior can also be modified through PMOD switch inputs, allowing different operational modes during demonstrations and testing.
+## How it runs
 
-### Main Features
+`main()` initializes the 48 MHz clock, the LEDs, the reflectance sensor, SysTick, the Timer_A1 periodic task, Timer_A2 PWM (both servos start at 0), the PMOD switches and the drive motors. Then it sits in an empty loop. All the work happens in the Timer_A1 task, which counts milliseconds:
 
-- Autonomous line-following navigation
-- FSM-based movement and decision making
-- PWM-controlled servo operation
-- Reflectance sensor processing
-- Timer interrupt-driven sampling
-- Switch-controlled operating modes
-- Intersection and dead-end handling
+- On every 10th tick it starts a reflectance reading.
+- On the next tick it reads the result and the switches, sets servo 1 to 2100, and then:
+  - **Any switch on:** closes the claw and runs the line-following state machine.
+  - **All switches off:** opens the claw, stops the motors and resets the turn counter `point` to 0.
 
----
+So the switches also work as the on/off control.
 
-## System Architecture
+## Sensor patterns
 
-The system is organized into several functional modules working together under the MSP432 microcontroller.
+The 8 sensor readings are packed into one byte. The names below follow the code (`FAR_LEFT` is bit 0, `FAR_RIGHT` is bit 7). This is what `FOLLOW_LINE` does for each pattern:
 
-### Control Flow
+| Reading | Name | Action |
+|---------|------|--------|
+| `00011000` | CENTER | drive forward |
+| `00011100` | SLIGHT_LEFT_CENTER | steer with `Motor_Right` |
+| `00001110` | OFF_LEFT | `Motor_Right` 150 ms, then forward 300 ms |
+| `00111000` | SLIGHT_RIGHT_CENTER | steer with `Motor_Left` |
+| `01110000` | OFF_RIGHT | `Motor_Left` 150 ms, then forward 300 ms |
+| `00000001` | FAR_LEFT | `Motor_Right` at 4500 for 300 ms, forward 300 ms, then `CHECK_INTERSECTION` |
+| `10000000` | FAR_RIGHT | `Motor_Left` at 2500 for 500 ms, forward 500 ms, then `CHECK_INTERSECTION` |
+| `11111000` | LEFT_TURN | `CHECK_INTERSECTION` |
+| `00011111` | RIGHT_TURN | `CHECK_INTERSECTION` |
+| `11111111` | T_INTERSECTION | `CHECK_INTERSECTION` |
+| `00000000` | DEAD_END | stop the motors, red LED on |
+| anything else | unknown | forward at half speed for 100 ms, stop, then `CHECK_INTERSECTION` |
 
-1. Timer interrupt triggers periodic sensor sampling
-2. Reflectance sensor data is processed
-3. FSM determines the robot state
-4. Motor and servo PWM outputs are updated
-5. LEDs and switch inputs provide system feedback and mode selection
+## State machine
 
-### Functional Modules
+| State | What it does |
+|-------|--------------|
+| `FOLLOW_LINE` | Default. Follows the line using the table above. |
+| `CHECK_INTERSECTION` | Creeps forward at half speed for 200 ms, stops, then decides what to do using the reading taken just before the creep. |
+| `TURN_LEFT_STATE` | Forward 90 ms, turn left at 4500 for 490 ms, forward 500 ms, then back to `CHECK_INTERSECTION`. |
+| `TURN_RIGHT_STATE` | The same sequence, turning right. |
+| `TURN_AROUND` | Turn left at 4500 for 900 ms, then back to `CHECK_INTERSECTION`. |
+| `DEAD_END_STATE` | Declared but never entered. A dead end is handled inside `FOLLOW_LINE`: the motors stop, and the robot resumes if it sees the line again. |
 
-#### Sensor Module
+In `CHECK_INTERSECTION`:
 
-The reflectance sensor array detects line position and surface transitions. Sensor outputs are interpreted as bit patterns to classify movement conditions such as:
+- **CENTER or a slight correction:** back to `FOLLOW_LINE`.
+- **T_INTERSECTION:** runs `pickup()`. If `point == 1` it then turns around. Otherwise it stops.
+- **LEFT_TURN / RIGHT_TURN:** the PMOD switches decide whether to turn or drive straight (next table). Either way `point` goes up by 1.
+- **Anything else:** back to `FOLLOW_LINE`.
 
-- Center alignment
-- Slight left/right deviation
-- Sharp turns
-- T-intersections
-- Dead ends
+`pickup()` opens the claw, waits 500 ms, closes it, and waits another 500 ms.
 
-#### Finite State Machine (FSM)
+## Route selection (PMOD switches)
 
-The FSM controls navigation behavior and robot decisions.
+`Get_PMOD_SWT_Status()` returns the switch value. 0 means stopped. The code treats values 1 and 4 specially:
 
-##### FSM States
+| Switch value | At a LEFT_TURN | At a RIGHT_TURN |
+|--------------|----------------|-----------------|
+| 1 | drive straight for 500 ms | drive straight for 500 ms |
+| 4 | drive straight for 500 ms | turn right |
+| any other non-zero value | turn left | turn right |
 
-- `FOLLOW_LINE` — Default line tracking
-- `CHECK_INTERSECTION` — Validates intersection conditions
-- `TURN_LEFT_STATE` — Executes left turn
-- `TURN_RIGHT_STATE` — Executes right turn
-- `TURN_AROUND` — Reverses direction
-- `DEAD_END` — Stops system operation
+## Servos, speeds and LEDs
 
-#### Motor and Servo Control
+Timer_A2 PWM drives two servos, and the duty values below are in timer counts:
 
-PWM signals generated using Timer_A2 control the servos responsible for robotic arm movement and pouring actions.
+- **Servo 1** is held at 2100 by the control loop. **[fill in: what it moves]**
+- **Servo 2 (claw):** open = 1500, closed = 2800.
 
-#### Timing and Interrupts
+Drive motors use `Motor_Forward`, `Motor_Left`, `Motor_Right` and `Motor_Stop`. Nominal speed is 2500 on both wheels, sharp turns use 4500, and creeping uses half speed (1250).
 
-Timer_A1 generates interrupts approximately every 10 ms for periodic sensor sampling and FSM updates.
+LED2 (RGB) shows what the robot is doing: green = following the line, yellow = correcting, pink = correcting the other way, white = FAR_LEFT, sky blue = FAR_RIGHT, blue = turning around or starting a pickup, red = unknown pattern or closing the claw. LED1 (red) comes on at a dead end or an unknown pattern.
 
----
+## Hardware and pins
 
-## Interfaces and Peripherals
+- TI MSP432 microcontroller with the 48 MHz clock
+- Two-wheel drive base, driven through `Motor.h` in `inc/` **[fill in: motor pins]**
+- 8-channel reflectance sensor array (5 V)
+- Two servos, powered from an external 5 V supply
+- PMOD switch module (4 switches, 3.3 V)
+- All grounds go to the board's GND
 
-The project integrates several peripherals connected to the MSP432 microcontroller.
+| Signal | Pin |
+|--------|-----|
+| Reflectance sensor outputs 0 to 7 | P7.0 to P7.7 |
+| Reflectance sensor control (even / odd) | P5.3 / P9.2 |
+| Servo 1 (Timer_A2 CCR1) | P5.6 |
+| Servo 2, claw (Timer_A2 CCR2) | P5.7 |
+| PMOD switches 1 to 4 | P10.0 to P10.3 |
 
-### PMOD Switch Interface
+## Source layout
 
-| Component | Description | MSP432 Pin |
-|---|---|---|
-| SWT1 | Switch 1 | P10.0 |
-| SWT2 | Switch 2 | P10.1 |
-| SWT3 | Switch 3 | P10.2 |
-| SWT4 | Switch 4 | P10.3 |
-| PMOD Pin 5 | Ground | GND |
-| PMOD Pin 6 | Power | VCC (3.3V) |
+- `main.c`: the state machine, the Timer_A1 task and the claw routines
+- `inc/`: drivers for the clock, GPIO, motors, reflectance sensor, SysTick, Timer_A1 and Timer_A2 **[fill in: which of these you wrote]**
 
-### Servo Motor Interface
+## Known limitations
 
-| Component | Signal | MSP432 Pin |
-|---|---|---|
-| Servo 1 | PWM Input | P5.6 (PM_TA2.1) |
-| Servo 1 | Power | External 5V |
-| Servo 1 | Ground | GND |
-| Servo 2 | PWM Input | P5.7 (PM_TA2.2) |
-| Servo 2 | Power | External 5V |
-| Servo 2 | Ground | GND |
+- The turn and recovery moves use fixed delays (up to 900 ms) inside the Timer_A1 task, so the robot isn't reading the sensor while it turns. These timings depend on battery level and wheel traction.
+- `collision_detected` and `PWM_NOMINAL` are declared but not used.
+- The route depends only on the switch value and the turn counter.
 
-### Reflectance Sensor Interface
+## Testing
 
-| Component | Signal | MSP432 Pin |
-|---|---|---|
-| Reflectance Sensor Output 0 | Channel 0 | P7.0 |
-| Reflectance Sensor Output 1 | Channel 1 | P7.1 |
-| Reflectance Sensor Output 2 | Channel 2 | P7.2 |
-| Reflectance Sensor Output 3 | Channel 3 | P7.3 |
-| Reflectance Sensor Output 4 | Channel 4 | P7.4 |
-| Reflectance Sensor Output 5 | Channel 5 | P7.5 |
-| Reflectance Sensor Output 6 | Channel 6 | P7.6 |
-| Reflectance Sensor Output 7 | Channel 7 | P7.7 |
-| Reflectance Sensor | Control Even | P5.3 |
-| Reflectance Sensor | Control Odd | P9.2 |
-| Reflectance Sensor | Power | 5V |
-| Reflectance Sensor | Ground | GND |
+We tested in stages on the robot:
 
----
+1. **Sensor.** Checked the readings at different line positions and confirmed that intersections and dead ends show up as the expected patterns.
+2. **State machine.** Ran each turn, recovery and turn-around case and watched the state transitions using the LED colors.
+3. **PWM and servos.** Checked the claw open and close positions and the pickup motion.
+4. **Full system.** Complete runs with different switch settings, repeated several times.
 
-## Verification and Testing
+## Build and run
 
-The system was tested incrementally to validate sensor functionality, FSM behavior, servo control, and overall robotic operation.
-
-### Sensor Testing
-
-- Verified reflectance sensor readings across different line positions
-- Confirmed proper detection of intersections and dead ends
-- Tested timing consistency using periodic interrupts
-
-### FSM Validation
-
-- Confirmed correct state transitions for all navigation cases
-- Tested turn execution and recovery behavior
-- Verified dead-end and turnaround handling
-
-### PWM and Servo Testing
-
-- Validated PWM generation using Timer_A2
-- Verified servo response and positioning accuracy
-- Tested pouring arm actuation during operation
-
-### Integrated System Testing
-
-- Performed complete line-following navigation tests
-- Evaluated intersection decision logic using PMOD switches
-- Tested full autonomous operation under repeated trials
-
----
-
-## Project Demonstration
-
-Demonstration videos and project walkthroughs will be included here.
-
-### Demo Videos
-
-- Full System Demonstration: *https://youtu.be/RD7pSS3bs8I*
-- GitHub Link: *https://github.com/CharbelAbouafech/cup-pouring-arm*
-
----
-
-## Conclusion
-
-The Cup Pouring Arm project demonstrates the implementation of an embedded autonomous robotic system using the MSP432 microcontroller. By integrating reflectance sensors, FSM-based navigation, timer interrupts, and PWM-controlled servos. Future improvements may include more advanced path-planning algorithms, wireless communication, and additional sensor integration for enhanced autonomous operation.
+1. Open the project in **[fill in: Code Composer Studio / Keil uVision]**.
+2. Build it and flash it to the MSP432.
+3. Wire the sensor, servos, motors and PMOD switches as in the table above.
+4. Put the robot on the line and turn on a switch to start. Turning all switches off stops it.
